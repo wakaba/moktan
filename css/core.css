@@ -1,11 +1,3 @@
-object-list:not([hidden]) {
-  display: block;
-}
-
-list-main:not([hidden]) {
-  display: block;
-}
-
 textarea {
   box-sizing: border-box;
   width: 100%;

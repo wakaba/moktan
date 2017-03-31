@@ -124,8 +124,12 @@ $component.define ('object-list', function (e) {
 
     $$ (this, 'list-filter').forEach (function (f) {
       var name = f.getAttribute ('name');
-      var value = f.getAttribute ('value');
-      url += (/\?/.test (url) ? '&' : '?') + 'filter=' + encodeURIComponent (name + ':' + value);
+      if (f.hasAttribute ('null')) {
+        url += (/\?/.test (url) ? '&' : '?') + 'filter=' + encodeURIComponent (name + ':null');
+      } else {
+        var value = f.getAttribute ('value');
+        url += (/\?/.test (url) ? '&' : '?') + 'filter=' + encodeURIComponent (name + '=' + value);
+      }
     });
 
     if (this.hasAttribute ('reverse')) {

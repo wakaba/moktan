@@ -301,12 +301,21 @@ return sub {
             $_;
           } @{$_[0]->all}];
           for my $filter (@$filters) {
-            if ($filter =~ /\A($NamePattern):([1-9][0-9]+)\z/o) {
+            if ($filter =~ /\A($NamePattern)=([1-9][0-9]+)\z/o) {
               my $name = $1;
               my $value = $2;
               $items = [grep {
                 if (defined $_->{data}->{$name} and
                     $_->{data}->{$name} eq $value) {
+                  $_;
+                } else {
+                  ();
+                }
+              } @$items];
+            } elsif ($filter =~ /\A($NamePattern):null\z/o) {
+              my $name = $1;
+              $items = [grep {
+                if (not defined $_->{data}->{$name}) {
                   $_;
                 } else {
                   ();
