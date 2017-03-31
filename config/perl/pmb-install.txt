@@ -2,9 +2,11 @@ AnyEvent~7.13
 AnyEvent::Fork~1.31
 Canary::Stability~2012
 Carp::Heavy~1.38
+Cwd~3.62
 Digest::SHA~5.96
 Encode~2.88
 Exporter::Lite~0.08
+File::Path~2.12
 File::Temp~0.2304
 Filter::Util::Call~1.57
 IO::FDPass~1.2
