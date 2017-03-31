@@ -83,26 +83,36 @@ function $fill (e, o) {
       f.textContent = value;
     }
   });
-  ['href', 'id'].forEach (function (name) {
+  ['href', 'src', 'id'].forEach (function (name) {
     $$ (e, '[data-' + name + '-template]').forEach (function (f) {
-      f.setAttribute (name, f.getAttribute ('data-' + name + '-template').replace (/\{([\w.]+)\}/g, function (_, fieldName) {
-        var value = o;
-        fieldName.split (/\./).forEach (function (name) {
-          if (value != null) {
-            value = value[name];
-          } else {
-            value = null;
-          }
-        });
-        return value;
-      }));
+      f.setAttribute (name, $fill.template (f.getAttribute ('data-' + name + '-template'), o));
     });
   });
 } // $fill
 
+$fill.template = function (t, o) {
+  return t.replace (/\{([\w.]+)\}/g, function (_, fieldName) {
+    var value = o;
+    fieldName.split (/\./).forEach (function (name) {
+      if (value != null) {
+        value = value[name];
+      } else {
+        value = null;
+      }
+    });
+    return value;
+  });
+}; // $fill.template
+
 $component.define ('object-list', function (e) {
   e._main = function () {
-    return $$ (this, 'list-main')[0];
+    var type = this.getAttribute ('type');
+    var q = {
+      'ul': 'ul',
+      'ol': 'ol',
+      'table': 'table tbody',
+    }[type] || 'list-main';
+    return $$ (this, q)[0];
   }; // _main
   e.load = function (opts) {
     var main = this._main ();
@@ -139,6 +149,13 @@ $component.define ('object-list', function (e) {
 
     var templates = $$ (this, 'template');
 
+    var type = this.getAttribute ('type');
+    var itemType = {
+      'ul': 'li',
+      'ol': 'li',
+      'table': 'tr',
+    }[type] || 'list-item';
+
     return e._loading = e._loading.then (function () {
       return fetch (url, {});
     }).then (function (res) {
@@ -149,14 +166,18 @@ $component.define ('object-list', function (e) {
       if (!template) return;
       var added = document.createDocumentFragment ();
       items.forEach (function (item) {
-        var f = document.createElement ('list-item');
-        f.attachShadow ({"mode": "open"});
-        $component.enableForTree (f.shadowRoot);
-        $$ (document, 'link[rel~=stylesheet]').forEach (function (g) {
-          f.shadowRoot.appendChild (g.cloneNode (true));
-        });
-        f.shadowRoot.appendChild (template.content.cloneNode (true));
-        $fill (f.shadowRoot, item);
+        var f = document.createElement (itemType);
+        var parent = f;
+        if (itemType === 'list-item') {
+          f.attachShadow ({"mode": "open"});
+          $component.enableForTree (f.shadowRoot);
+          parent = f.shadowRoot;
+          $$ (document, 'link[rel~=stylesheet]').forEach (function (g) {
+            parent.appendChild (g.cloneNode (true));
+          });
+        }
+        parent.appendChild (template.content.cloneNode (true));
+        $fill (parent, item);
         if (opts.reverse) {
           added.insertBefore (f, added.firstChild);
         } else {
@@ -209,8 +230,9 @@ $component.define ('form', function (e) {
     fetch (this.action, {
       method: this.method,
       body: body,
+      referrerPolicy: 'origin',
     }).then (function (res) {
-      return res.json;
+      return res.json ();
     }).then (function (json) {
       return $component.actions (e, 'data-submitted', {json: json});
     }).then (function () {
@@ -237,6 +259,10 @@ $component.defineAction ('data-submitted', 'objectListReload', function (data, a
 
 $component.defineAction ('data-submitted', 'reset', function () {
   this.reset ();
+});
+
+$component.defineAction ('data-submitted', 'go', function (data, arg) {
+  location.href = $fill.template (arg, data.json);
 });
 
 /*

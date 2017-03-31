@@ -1,7 +1,48 @@
+h1 a:not(:active):not(:hover) {
+  color: inherit;
+  background: transparent;
+  text-decoration: none;
+}
+
 textarea {
   box-sizing: border-box;
   width: 100%;
   min-height: 10em;
+}
+
+summary {
+  cursor: pointer;
+}
+
+.icon:not([hidden]) {
+  display: inline-block;
+  width: 2em;
+  height: 2em;
+  margin: .2em;
+  border-style: none;
+  border-radius: 50%;
+  vertical-align: middle;
+}
+
+html.icon-content {
+  margin: 0;
+  padding: 10vh;
+  background: blue;
+  color: white;
+}
+html.icon-content > body:not([hidden]) {
+  display: block;
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  overflow: hidden;
+}
+
+icon-text:not([hidden]) {
+  display: block;
+  line-height: 1.0;
+  font-size: 80vh;
+  white-space: nowrap;
 }
 
 /*
