@@ -262,7 +262,7 @@ return sub {
         return $db->select ('object', {
           type => Dongry::Type->serialize ('text', $path->[0]),
           id => Dongry::Type->serialize ('text', $path->[1]),
-        }, fields => ['id'], source_name => 'master')->then (sub {
+        }, source_name => 'master')->then (sub {
           my $all = $_[0]->all;
           return $app->throw_error (404, reason_phrase => 'Object not found')
               unless @$all;
@@ -288,9 +288,10 @@ return sub {
           type => Dongry::Type->serialize ('text', $path->[0]),
         };
         $where->{timestamp} = $page->{value} if defined $page->{value};
+        my $filters = $app->text_param_list ('filter');
         return $db->select ('object', $where,
           source_name => 'master',
-          offset => $page->{offset}, limit => $page->{limit},
+          offset => $page->{offset}, limit => $page->{limit} * 5,
           order => ['timestamp', $page->{order_direction}],
         )->then (sub {
           my $items = [map {
@@ -299,6 +300,24 @@ return sub {
             $_->{type} = $path->[0];
             $_;
           } @{$_[0]->all}];
+          for my $filter (@$filters) {
+            if ($filter =~ /\A($NamePattern):([1-9][0-9]+)\z/o) {
+              my $name = $1;
+              my $value = $2;
+              $items = [grep {
+                if (defined $_->{data}->{$name} and
+                    $_->{data}->{$name} eq $value) {
+                  $_;
+                } else {
+                  ();
+                }
+              } @$items];
+            } else {
+              return $app->throw_error
+                  (400, reason_phrase => 'Bad filter |'.$filter.'|');
+            }
+          }
+          @$items = @$items[0..($page->{limit}-1)] if @$items > $page->{limit};
           my $next_page = next_page $page, $items, 'timestamp';
           return json $app, {objects => $items, %$next_page};
         });

@@ -2,16 +2,25 @@ function $$ (d, s) {
   return Array.prototype.slice.apply (d.querySelectorAll (s));
 } // $$
 
-function $component (n, c) {
+$$.root = function (n) {
+  while (n.parentNode) {
+    n = n.parentNode;
+  }
+  return n;
+}; // root
+
+function $component () { }
+$component.define = function (n, c) {
   $component.handlers[n] = c;
   $$ (document, n).forEach (c);
-} // $component
+}; // $component.define
 $component.handlers = {};
 
-(function () {  
+$component.enableForTree = function (root) {
   (new MutationObserver (function (mutations) {
     mutations.forEach (function (m) {
       Array.prototype.forEach.call (m.addedNodes, function (x) {
+        if (x.nodeType !== x.ELEMENT_NODE) return;
         Object.keys ($component.handlers).forEach (function (n) {
           if (x.localName === n) {
             $component.handlers[n] (x);
@@ -20,8 +29,9 @@ $component.handlers = {};
         });
       });
     });
-  })).observe (document.documentElement, {childList: true, subtree: true});
-}) ();
+  })).observe (root, {childList: true, subtree: true});
+}; // enableForTree
+$component.enableForTree (document.documentElement);
 
 $component.actions = function (e, attrName, data) {
   var p = Promise.resolve ();
@@ -58,13 +68,22 @@ function $fill (e, o) {
       }
     });
     if (f.localName === 'time') {
-      var dt = new Date (parseFloat (value) * 1000);
-      f.textContent = dt.toISOString ();
+      try {
+        var dt = new Date (parseFloat (value) * 1000);
+        f.textContent = dt.toISOString ();
+      } catch (e) {
+        f.textContent = value;
+      }
+    } else if (f.localName === 'input') {
+      f.setAttribute ('data-value', value);
+      f.value = value;
+    } else if (f.localName === 'list-filter') {
+      f.setAttribute ('value', value);
     } else {
       f.textContent = value;
     }
   });
-  ['href'].forEach (function (name) {
+  ['href', 'id'].forEach (function (name) {
     $$ (e, '[data-' + name + '-template]').forEach (function (f) {
       f.setAttribute (name, f.getAttribute ('data-' + name + '-template').replace (/\{([\w.]+)\}/g, function (_, fieldName) {
         var value = o;
@@ -81,7 +100,7 @@ function $fill (e, o) {
   });
 } // $fill
 
-$component ('object-list', function (e) {
+$component.define ('object-list', function (e) {
   e._main = function () {
     return $$ (this, 'list-main')[0];
   }; // _main
@@ -103,6 +122,17 @@ $component ('object-list', function (e) {
       url += (/\?/.test (url) ? '&' : '?') + 'limit=' + limit;
     }
 
+    $$ (this, 'list-filter').forEach (function (f) {
+      var name = f.getAttribute ('name');
+      var value = f.getAttribute ('value');
+      url += (/\?/.test (url) ? '&' : '?') + 'filter=' + encodeURIComponent (name + ':' + value);
+    });
+
+    if (this.hasAttribute ('reverse')) {
+      opts.reverse = !opts.reverse;
+      opts.prepend = !opts.prepend;
+    }
+
     var templates = $$ (this, 'template');
 
     return e._loading = e._loading.then (function () {
@@ -116,8 +146,13 @@ $component ('object-list', function (e) {
       var added = document.createDocumentFragment ();
       items.forEach (function (item) {
         var f = document.createElement ('list-item');
-        f.appendChild (template.content.cloneNode (true));
-        $fill (f, item);
+        f.attachShadow ({"mode": "open"});
+        $component.enableForTree (f.shadowRoot);
+        $$ (document, 'link[rel~=stylesheet]').forEach (function (g) {
+          f.shadowRoot.appendChild (g.cloneNode (true));
+        });
+        f.shadowRoot.appendChild (template.content.cloneNode (true));
+        $fill (f.shadowRoot, item);
         if (opts.reverse) {
           added.insertBefore (f, added.firstChild);
         } else {
@@ -161,7 +196,7 @@ $component ('object-list', function (e) {
   e.load ({updatePager: true});
 }); // <object-list>
 
-$component ('form', function (e) {
+$component.define ('form', function (e) {
   e.onsubmit = function () {
     var body = new FormData (this);
     var controls = $$ (e, 'input:enabled, select:enabled, textarea:enabled, button:enabled');
@@ -184,7 +219,7 @@ $component ('form', function (e) {
 }); // <form>
 
 $component.defineAction ('data-submitted', 'objectListLoadNewer', function (data, arg) {
-  var list = document.getElementById (arg);
+  var list = $$.root (this).getElementById (arg);
   if (!list) throw "Element #" + arg + ' not found';
   list.loadNewer ();
 });
