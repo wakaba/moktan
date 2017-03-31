@@ -20,6 +20,8 @@ my $Config = json_bytes2perl $json_path->slurp;
 for my $key (qw(base html js css)) {
   $Config->{$key.'_path'} = path ($Config->{$key.'_path'} // './' . $key)->absolute (path ($Config->{base_path} // $json_path)->parent);
 }
+$Config->{js_core_path} = path (__FILE__)->parent->parent->child ('js');
+$Config->{css_core_path} = path (__FILE__)->parent->parent->child ('css');
 
 sub with_db (&) {
   my $db = Dongry::Database->new (sources => {
@@ -40,6 +42,8 @@ sub static ($$$) {
       ($Config->{{
         css => 'css_path',
         js => 'js_path',
+        css_core => 'css_core_path',
+        js_core => 'js_core_path',
       }->{$type}}->child ($path));
   return $file->stat->then (sub {
     return $_[0]->mtime;
@@ -50,7 +54,9 @@ sub static ($$$) {
     return $file->read_byte_string->then (sub {
       $app->http->add_response_header ('Content-Type' => {
         css => 'text/css; charset=utf-8',
+        css_core => 'text/css; charset=utf-8',
         js => 'text/javascript; charset=utf-8',
+        js_core => 'text/javascript; charset=utf-8',
       }->{$type});
       $app->http->send_response_body_as_ref (\($_[0]));
       return $app->http->close_response_body;
@@ -310,6 +316,9 @@ return sub {
         return $db->execute ('select uuid_short() as uuid', undef, source_name => 'master')->then (sub {
           my $id = $_[0]->first->{uuid};
           my $data = {};
+          for (keys %{$app->http->request_body_params}) {
+            $data->{$_} = $app->text_param ($_);
+          }
           return $db->insert ('object', [{
             id => $id,
             type => Dongry::Type->serialize ('text', $path->[0]),
@@ -330,9 +339,23 @@ return sub {
       return static $app, 'css', $path->[1];
     }
 
+    if (@$path == 3 and
+        $path->[0] eq 'css' and
+        $path->[1] eq 'core' and
+        $path->[2] =~ /\A[A-Za-z0-9-]+\.css\z/) {
+      return static $app, 'css_core', $path->[2];
+    }
+
     if (@$path == 2 and
         $path->[0] eq 'js' and $path->[1] =~ /\A[A-Za-z0-9-]+\.js\z/) {
       return static $app, 'js', $path->[1];
+    }
+
+    if (@$path == 3 and
+        $path->[0] eq 'js' and
+        $path->[1] eq 'core' and
+        $path->[2] =~ /\A[A-Za-z0-9-]+\.js\z/) {
+      return static $app, 'js_core', $path->[2];
     }
 
     return $app->throw_error (404);
@@ -354,6 +377,6 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
 Affero General Public License for more details.
 
 You does not have received a copy of the GNU Affero General Public
-License along with this program, see <http://www.gnu.org/licenses/>.
+License along with this program, see <https://www.gnu.org/licenses/>.
 
 =cut
