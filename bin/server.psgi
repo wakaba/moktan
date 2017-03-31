@@ -236,7 +236,7 @@ return sub {
     if (@$path == 3 and
         $path->[0] =~ /\A$NamePattern\z/o and
         $path->[1] =~ /\A[1-9][0-9]*\z/ and
-        $path->[2] eq '') {
+        ($path->[2] eq '' or $path->[2] =~ /\A$NamePattern\z/o)) {
       # /{name}/{id}/
       return with_db {
         my $db = shift;
@@ -246,7 +246,7 @@ return sub {
         }, fields => ['id'], source_name => 'master')->then (sub {
           return $app->throw_error (404, reason_phrase => 'Object not found')
               unless $_[0]->first;
-          my $file = $path->[0] . '.id.index.html.tm';
+          my $file = $path->[0] . '.id.'.($path->[2] || 'index').'.html.tm';
           return temma $app, $file, {};
         });
       };
@@ -273,6 +273,42 @@ return sub {
             $_;
           } @$all];
           return json $app, {objects => $items};
+        });
+      };
+    }
+
+    if (@$path == 3 and
+        $path->[0] =~ /\A$NamePattern\z/o and
+        $path->[1] =~ /\A[1-9][0-9]*\z/ and
+        $path->[2] eq 'edit.json') {
+      # /{name}/{id}/edit.json
+      return with_db {
+        my $db = shift;
+        return $db->select ('object', {
+          type => Dongry::Type->serialize ('text', $path->[0]),
+          id => Dongry::Type->serialize ('text', $path->[1]),
+        }, source_name => 'master')->then (sub {
+          my $item = $_[0]->first;
+          return $app->throw_error (404, reason_phrase => 'Object not found')
+              unless defined $item;
+          $item->{data} = Dongry::Type->parse ('json', $item->{data});
+
+          for (keys %{$app->http->request_body_params}) {
+            $item->{data}->{$_} = $app->text_param ($_);
+          }
+
+          $item->{timestamp} = 0+$_->{data}->{timestamp}
+              if defined $item->{data}->{timestamp};
+
+          return $db->update ('object', {
+            timestamp => $item->{timestamp},
+            data => Dongry::Type->serialize ('json', $item->{data}),
+          }, where => {
+            type => Dongry::Type->serialize ('text', $path->[0]),
+            id => Dongry::Type->serialize ('text', $path->[1]),
+          });
+        })->then (sub {
+          return json $app, {};
         });
       };
     }

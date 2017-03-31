@@ -164,6 +164,7 @@ $component.define ('object-list', function (e) {
         }
         if (e._newest < item.timestamp) e._newest = item.timestamp;
       });
+      if (opts.clear) main.textContent = '';
       if (opts.prepend) {
         main.insertBefore (added, main.firstChild);
       } else {
@@ -226,6 +227,12 @@ $component.defineAction ('data-submitted', 'objectListLoadNewer', function (data
   var list = $$.root (this).getElementById (arg);
   if (!list) throw "Element #" + arg + ' not found';
   list.loadNewer ();
+});
+
+$component.defineAction ('data-submitted', 'objectListReload', function (data, arg) {
+  var list = $$.root (this).getElementById (arg);
+  if (!list) throw "Element #" + arg + ' not found';
+  list.load ({clear: true, updatePager: true});
 });
 
 $component.defineAction ('data-submitted', 'reset', function () {
