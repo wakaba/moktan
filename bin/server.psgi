@@ -34,6 +34,30 @@ sub with_db (&) {
   } Promise->resolve ($db)->then ($_[0]);
 } # with_db
 
+sub static ($$$) {
+  my ($app, $type, $path) = @_;
+  my $file = Promised::File->new_from_path
+      ($Config->{{
+        css => 'css_path',
+        js => 'js_path',
+      }->{$type}}->child ($path));
+  return $file->stat->then (sub {
+    return $_[0]->mtime;
+  }, sub {
+    return $app->throw_error (404, reason_phrase => 'File not found');
+  })->then (sub {
+    $app->http->set_response_last_modified ($_[0]);
+    return $file->read_byte_string->then (sub {
+      $app->http->add_response_header ('Content-Type' => {
+        css => 'text/css; charset=utf-8',
+        js => 'text/javascript; charset=utf-8',
+      }->{$type});
+      $app->http->send_response_body_as_ref (\($_[0]));
+      return $app->http->close_response_body;
+    });
+  });
+} # static
+
 sub json ($$) {
   my ($app) = @_;
   $app->http->set_response_header
@@ -105,6 +129,79 @@ sub json ($$) {
   } # DESTROY
 }
 
+sub this_page ($%) {
+  my ($app, %args) = @_;
+  my $page = {
+    order_direction => 'DESC',
+    limit => 0+($app->bare_param ('limit') // $args{limit} // 30),
+    offset => 0,
+    value => undef,
+  };
+  my $max_limit = $args{max_limit} // 100;
+  return $app->throw_error (400, reason_phrase => "Bad |limit|")
+      if $page->{limit} < 1 or $page->{limit} > $max_limit;
+  my $ref = $app->bare_param ('ref');
+  if (defined $ref) {
+    if ($ref =~ /\A([+-])([0-9.]+),([0-9]+)\z/) {
+      $page->{order_direction} = $1 eq '+' ? 'ASC' : 'DESC';
+      $page->{exact_value} = 0+$2;
+      $page->{value} = {($page->{order_direction} eq 'ASC' ? '>=' : '<='), $page->{exact_value}};
+      $page->{offset} = 0+$3;
+      return $app->throw_error (400, reason_phrase => "Bad |ref| offset")
+          if $page->{offset} > 100;
+      $page->{ref} = $ref;
+    } else {
+      return $app->throw_error (400, reason_phrase => "Bad |ref|");
+    }
+  }
+  return $page;
+} # this_page
+
+sub next_page ($$$) {
+  my ($this_page, $items, $value_key) = @_;
+  my $next_page = {};
+  my $sign = $this_page->{order_direction} eq 'ASC' ? '+' : '-';
+  my $values = {};
+  $values->{$this_page->{exact_value}} = $this_page->{offset}
+      if defined $this_page->{exact_value};
+  if (ref $items eq 'ARRAY') {
+    if (@$items) {
+      my $last_value = $items->[0]->{$value_key};
+      for (@$items) {
+        $values->{$_->{$value_key}}++;
+        if ($sign eq '+') {
+          $last_value = $_->{$value_key} if $last_value < $_->{$value_key};
+        } else {
+          $last_value = $_->{$value_key} if $last_value > $_->{$value_key};
+        }
+      }
+      $next_page->{next_ref} = $sign . $last_value . ',' . $values->{$last_value};
+      $next_page->{has_next} = @$items == $this_page->{limit};
+    } else {
+      $next_page->{next_ref} = $this_page->{ref};
+      $next_page->{has_next} = 0;
+    }
+  } else { # HASH
+    if (keys %$items) {
+      my $last_value = $items->{each %$items}->{$value_key};
+      for (values %$items) {
+        $values->{$_->{$value_key}}++;
+        if ($sign eq '+') {
+          $last_value = $_->{$value_key} if $last_value < $_->{$value_key};
+        } else {
+          $last_value = $_->{$value_key} if $last_value > $_->{$value_key};
+        }
+      }
+      $next_page->{next_ref} = $sign . $last_value . ',' . $values->{$last_value};
+      $next_page->{has_next} = (keys %$items) == $this_page->{limit};
+    } else {
+      $next_page->{next_ref} = $this_page->{ref};
+      $next_page->{has_next} = 0;
+    }
+  }
+  return $next_page;
+} # next_page
+
 my $NamePattern = qr/[A-Za-z][A-Za-z0-9_]*/;
 
 return sub {
@@ -130,8 +227,80 @@ return sub {
       return temma $app, $file, {};
     }
 
+    if (@$path == 3 and
+        $path->[0] =~ /\A$NamePattern\z/o and
+        $path->[1] =~ /\A[1-9][0-9]*\z/ and
+        $path->[2] eq '') {
+      # /{name}/{id}/
+      return with_db {
+        my $db = shift;
+        return $db->select ('object', {
+          type => Dongry::Type->serialize ('text', $path->[0]),
+          id => Dongry::Type->serialize ('text', $path->[1]),
+        }, fields => ['id'], source_name => 'master')->then (sub {
+          return $app->throw_error (404, reason_phrase => 'Object not found')
+              unless $_[0]->first;
+          my $file = $path->[0] . '.id.index.html.tm';
+          return temma $app, $file, {};
+        });
+      };
+    }
+
+    if (@$path == 3 and
+        $path->[0] =~ /\A$NamePattern\z/o and
+        $path->[1] =~ /\A[1-9][0-9]*\z/ and
+        $path->[2] eq 'info.json') {
+      # /{name}/{id}/info.json
+      return with_db {
+        my $db = shift;
+        return $db->select ('object', {
+          type => Dongry::Type->serialize ('text', $path->[0]),
+          id => Dongry::Type->serialize ('text', $path->[1]),
+        }, fields => ['id'], source_name => 'master')->then (sub {
+          my $all = $_[0]->all;
+          return $app->throw_error (404, reason_phrase => 'Object not found')
+              unless @$all;
+          my $items = [map {
+            $_->{data} = Dongry::Type->parse ('json', $_->{data});
+            $_->{id} .= '';
+            $_->{type} = $path->[0];
+            $_;
+          } @$all];
+          return json $app, {objects => $items};
+        });
+      };
+    }
+
     if (@$path == 2 and
-        $path->[0] =~ /$NamePattern/o and
+        $path->[0] =~ /\A$NamePattern\z/o and
+        $path->[1] eq 'list.json') {
+      # /{name}/list.json
+      return with_db {
+        my $db = shift;
+        my $page = this_page ($app, limit => 30, max_limit => 100);
+        my $where = {
+          type => Dongry::Type->serialize ('text', $path->[0]),
+        };
+        $where->{timestamp} = $page->{value} if defined $page->{value};
+        return $db->select ('object', $where,
+          source_name => 'master',
+          offset => $page->{offset}, limit => $page->{limit},
+          order => ['timestamp', $page->{order_direction}],
+        )->then (sub {
+          my $items = [map {
+            $_->{data} = Dongry::Type->parse ('json', $_->{data});
+            $_->{id} .= '';
+            $_->{type} = $path->[0];
+            $_;
+          } @{$_[0]->all}];
+          my $next_page = next_page $page, $items, 'timestamp';
+          return json $app, {objects => $items, %$next_page};
+        });
+      };
+    }
+
+    if (@$path == 2 and
+        $path->[0] =~ /\A$NamePattern\z/o and
         $path->[1] eq 'create.json') {
       # /{name}/create.json
       $app->requires_request_method ({POST => 1});
@@ -154,6 +323,16 @@ return sub {
           });
         });
       };
+    }
+
+    if (@$path == 2 and
+        $path->[0] eq 'css' and $path->[1] =~ /\A[A-Za-z0-9-]+\.css\z/) {
+      return static $app, 'css', $path->[1];
+    }
+
+    if (@$path == 2 and
+        $path->[0] eq 'js' and $path->[1] =~ /\A[A-Za-z0-9-]+\.js\z/) {
+      return static $app, 'js', $path->[1];
     }
 
     return $app->throw_error (404);
