@@ -72,9 +72,27 @@ sub json ($$) {
   $app->http->close_response_body;
 } # json
 
+
+my $NamePattern = qr/[A-Za-z][A-Za-z0-9_]*/;
+my $IDPattern = qr/[1-9][0-9]*/;
+
 {
   sub temma ($$$) {
-    my ($app, $template_path, $args) = @_;
+    my ($app, $url_path, $args) = @_;
+
+    my $template_path = join '.', map {
+      if ($_ eq '') {
+        'index';
+      } elsif ($_ =~ /\A$NamePattern\z/o) {
+        $_;
+      } elsif ($_ =~ /\A$IDPattern\z/o) {
+        'id';
+      } else {
+        die "Bad path segment |$_|";
+      }
+    } @$url_path;
+    $template_path .= '.html.tm';
+
     my $http = $app->http;
     my $path = $Config->{html_path}->child ($template_path);
     my $file = Promised::File->new_from_path ($path);
@@ -208,8 +226,6 @@ sub next_page ($$$) {
   return $next_page;
 } # next_page
 
-my $NamePattern = qr/[A-Za-z][A-Za-z0-9_]*/;
-
 return sub {
   my $http = Wanage::HTTP->new_from_psgi_env ($_[0]);
   my $app = Warabe::App->new_from_http ($http);
@@ -229,15 +245,15 @@ return sub {
     if ($path->[-1] eq '' and
         not grep { not /\A$NamePattern\z/o } @$path[0..($#$path-1)]) {
       # /{name}/.../{name}/
-      my $file = (join '.', @$path) . 'index.html.tm';
-      return temma $app, $file, {};
+      return temma $app, $path, {};
     }
 
     if (@$path == 3 and
         $path->[0] =~ /\A$NamePattern\z/o and
-        $path->[1] =~ /\A[1-9][0-9]*\z/ and
+        $path->[1] =~ /\A$IDPattern\z/ and
         ($path->[2] eq '' or $path->[2] =~ /\A$NamePattern\z/o)) {
       # /{name}/{id}/
+      # /{name}/{id}/{name}
       return with_db {
         my $db = shift;
         return $db->select ('object', {
@@ -246,15 +262,14 @@ return sub {
         }, fields => ['id'], source_name => 'master')->then (sub {
           return $app->throw_error (404, reason_phrase => 'Object not found')
               unless $_[0]->first;
-          my $file = $path->[0] . '.id.'.($path->[2] || 'index').'.html.tm';
-          return temma $app, $file, {};
+          return temma $app, $path, {};
         });
       };
     }
 
     if (@$path == 3 and
         $path->[0] =~ /\A$NamePattern\z/o and
-        $path->[1] =~ /\A[1-9][0-9]*\z/ and
+        $path->[1] =~ /\A$IDPattern\z/ and
         $path->[2] eq 'info.json') {
       # /{name}/{id}/info.json
       return with_db {
@@ -306,7 +321,7 @@ return sub {
 
     if (@$path == 3 and
         $path->[0] =~ /\A$NamePattern\z/o and
-        $path->[1] =~ /\A[1-9][0-9]*\z/ and
+        $path->[1] =~ /\A$IDPattern\z/ and
         $path->[2] eq 'edit.json') {
       # /{name}/{id}/edit.json
       return with_db {
@@ -342,7 +357,7 @@ return sub {
 
     if (@$path == 3 and
         $path->[0] =~ /\A$NamePattern\z/o and
-        $path->[1] =~ /\A[1-9][0-9]*\z/ and
+        $path->[1] =~ /\A$IDPattern\z/ and
         $path->[2] eq 'setcookie.json') {
       # /{name}/{id}/setcookie.json
       $app->requires_request_method ({POST => 1});
@@ -448,26 +463,26 @@ return sub {
     }
 
     if (@$path == 2 and
-        $path->[0] eq 'css' and $path->[1] =~ /\A[A-Za-z0-9-]+\.css\z/) {
+        $path->[0] eq 'css' and $path->[1] =~ /\A$NamePattern\.css\z/o) {
       return static $app, 'css', $path->[1];
     }
 
     if (@$path == 3 and
         $path->[0] eq 'css' and
         $path->[1] eq 'core' and
-        $path->[2] =~ /\A[A-Za-z0-9-]+\.css\z/) {
+        $path->[2] =~ /\A$NamePattern\.css\z/o) {
       return static $app, 'css_core', $path->[2];
     }
 
     if (@$path == 2 and
-        $path->[0] eq 'js' and $path->[1] =~ /\A[A-Za-z0-9-]+\.js\z/) {
+        $path->[0] eq 'js' and $path->[1] =~ /\A$NamePattern\.js\z/o) {
       return static $app, 'js', $path->[1];
     }
 
     if (@$path == 3 and
         $path->[0] eq 'js' and
         $path->[1] eq 'core' and
-        $path->[2] =~ /\A[A-Za-z0-9-]+\.js\z/) {
+        $path->[2] =~ /\A$NamePattern\.js\z/o) {
       return static $app, 'js_core', $path->[2];
     }
 
