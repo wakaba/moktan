@@ -79,6 +79,10 @@ function $fill (e, o) {
       f.value = value;
     } else if (f.localName === 'list-filter') {
       f.setAttribute ('value', value);
+    } else if (f.localName === 'object-list') {
+      f.setAttribute ('object-id', value);
+    } else if (f.localName === 'if-account') {
+      f.setAttribute ('account-id', value);
     } else {
       f.textContent = value;
     }
@@ -124,6 +128,8 @@ $component.define ('object-list', function (e) {
       var type = this.getAttribute ('object-type');
       if (this.hasAttribute ('object-selected')) {
         var url = '/' + encodeURIComponent (type) + '/selected.json';
+      } else if (this.hasAttribute ('object-id')) {
+        var url = '/' + encodeURIComponent (type) + '/' + encodeURIComponent (this.getAttribute ('object-id')) + '/info.json';
       } else {
         var url = '/' + encodeURIComponent (type) + '/list.json';
       }
@@ -283,6 +289,73 @@ $component.defineAction ('data-submitted', 'reset', function () {
 
 $component.defineAction ('data-submitted', 'go', function (data, arg) {
   location.href = $fill.template (arg, data.json);
+});
+
+$component.defineAction ('data-submitted', 'reloadAccount', function (data, arg) {
+  $$ (document, 'with-account, if-account').forEach (function (f) {
+    f.reload ();
+  });
+
+  // XXX shadow trees
+});
+
+$component.define ('with-account', function (e) {
+  e.reload = function () {
+    return fetch ('/account/selected.json', {
+      credentials: 'same-origin',
+    }).then (function (res) {
+      return res.json ();
+    }).then (function (json) {
+      var accountTemplate;
+      var guestTemplate;
+      Array.prototype.slice.call (e.children).forEach (function (f) {
+        if (f.localName === 'template') {
+          if (f.hasAttribute ('data-guest')) {
+            guestTemplate = f;
+          } else {
+            accountTemplate = f;
+          }
+        } else {
+          f.remove ();
+        }
+      });
+      var account = json.objects[0];
+      var template = account ? accountTemplate : guestTemplate;
+      if (template) {
+        var parent = template.content.cloneNode (true);
+        $fill (parent, account);
+        e.appendChild (parent);
+      }
+    }); // XXX error
+  }; // reload
+  e.reload ();
+});
+
+$component.define ('if-account', function (e) {
+  e.reload = function () {
+    return fetch ('/account/selected.json', {
+      credentials: 'same-origin',
+    }).then (function (res) {
+      return res.json ();
+    }).then (function (json) {
+      var template;
+      Array.prototype.slice.call (e.children).forEach (function (f) {
+        if (f.localName === 'template') {
+          template = f;
+        } else {
+          f.remove ();
+        }
+      });
+      var account = json.objects[0];
+      if (template && account && account.id == e.getAttribute ('account-id')) {
+        var parent = template.content.cloneNode (true);
+        $fill (parent, account);
+        e.appendChild (parent);
+      }
+      e.setAttribute ('data-current-account-id', account ? account.id : null);
+    }); // XXX error
+  }; // reload
+  e.reload ();
 });
 
 /*

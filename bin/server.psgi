@@ -269,6 +269,7 @@ return sub {
           my $items = [map {
             $_->{data} = Dongry::Type->parse ('json', $_->{data});
             $_->{id} .= '';
+            $_->{account_id} .= '';
             $_->{type} = $path->[0];
             $_;
           } @$all];
@@ -294,6 +295,7 @@ return sub {
           my $items = [map {
             $_->{data} = Dongry::Type->parse ('json', $_->{data});
             $_->{id} .= '';
+            $_->{account_id} .= '';
             $_->{type} = $path->[0];
             $_;
           } @$all];
@@ -375,6 +377,7 @@ return sub {
           my $items = [map {
             $_->{data} = Dongry::Type->parse ('json', $_->{data});
             $_->{id} .= '';
+            $_->{account_id} .= '';
             $_->{type} = $path->[0];
             $_;
           } @{$_[0]->all}];
@@ -425,10 +428,14 @@ return sub {
           for (keys %{$app->http->request_body_params}) {
             $data->{$_} = $app->text_param ($_);
           }
+          unless (defined $data->{account_id}) {
+            $data->{account_id} = $app->http->request_cookies->{"selected:account"};
+          }
           return $db->insert ('object', [{
             id => $id,
             type => Dongry::Type->serialize ('text', $path->[0]),
             data => Dongry::Type->serialize ('json', $data),
+            account_id => 0+($data->{account_id} || 0),
             timestamp => time,
           }])->then (sub {
             return json $app, {
