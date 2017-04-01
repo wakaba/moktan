@@ -377,14 +377,14 @@ return sub {
       # /{name}/{id}/edit.json
       return with_db {
         my $db = shift;
-        return $db->select ('object', {
-          type => Dongry::Type->serialize ('text', $path->[0]),
-          id => Dongry::Type->serialize ('text', $path->[1]),
-        }, source_name => 'master')->then (sub {
-          my $item = $_[0]->first;
-          return $app->throw_error (404, reason_phrase => 'Object not found')
-              unless defined $item;
-          $item->{data} = Dongry::Type->parse ('json', $item->{data});
+        return get_objects ($db,
+          type => $path->[0],
+          id => $path->[1],
+          empty => sub {
+            return $app->throw_error (404, reason_phrase => 'Object not found');
+          },
+        )->then (sub {
+          my $item = $_[0]->[0];
 
           for (keys %{$app->http->request_body_params}) {
             $item->{data}->{$_} = $app->text_param ($_);
@@ -392,13 +392,16 @@ return sub {
 
           $item->{timestamp} = 0+$_->{data}->{timestamp}
               if defined $item->{data}->{timestamp};
+          $item->{account_id} = 0+$_->{data}->{account_id}
+              if defined $item->{data}->{account_id};
 
           return $db->update ('object', {
             timestamp => $item->{timestamp},
+            account_id => $item->{account_id},
             data => Dongry::Type->serialize ('json', $item->{data}),
           }, where => {
-            type => Dongry::Type->serialize ('text', $path->[0]),
-            id => Dongry::Type->serialize ('text', $path->[1]),
+            type => Dongry::Type->serialize ('text', $item->{type}),
+            id => Dongry::Type->serialize ('text', $item->{id}),
           });
         })->then (sub {
           return json $app, {};
