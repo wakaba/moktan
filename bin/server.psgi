@@ -226,6 +226,27 @@ sub next_page ($$$) {
   return $next_page;
 } # next_page
 
+sub get_objects (%) {
+  my %args = @_;
+  return $args{search}->()->then (sub {
+    my $items = [map {
+      $_->{data} = Dongry::Type->parse ('json', $_->{data});
+      $_->{id} .= '';
+      $_->{account_id} .= '';
+      $_->{type} = Dongry::Type->parse ('text', $_->{type});
+      $_;
+    } @{ref $_[0] eq 'ARRAY' ? $_[0] : $_[0]->all}];
+    return $args{filter}->($items) if defined $args{filter};
+    return $items;
+  })->then (sub {
+    my $items = $_[0];
+    if (defined $args{empty} and @$items == 0) {
+      return $args{empty}->();
+    }
+    return $items;
+  });
+} # get_objects
+
 return sub {
   my $http = Wanage::HTTP->new_from_psgi_env ($_[0]);
   my $app = Warabe::App->new_from_http ($http);
@@ -254,17 +275,7 @@ return sub {
         ($path->[2] eq '' or $path->[2] =~ /\A$NamePattern\z/o)) {
       # /{name}/{id}/
       # /{name}/{id}/{name}
-      return with_db {
-        my $db = shift;
-        return $db->select ('object', {
-          type => Dongry::Type->serialize ('text', $path->[0]),
-          id => Dongry::Type->serialize ('text', $path->[1]),
-        }, fields => ['id'], source_name => 'master')->then (sub {
-          return $app->throw_error (404, reason_phrase => 'Object not found')
-              unless $_[0]->first;
-          return temma $app, $path, {};
-        });
-      };
+      return temma $app, $path, {};
     }
 
     if (@$path == 3 and
@@ -274,21 +285,18 @@ return sub {
       # /{name}/{id}/info.json
       return with_db {
         my $db = shift;
-        return $db->select ('object', {
-          type => Dongry::Type->serialize ('text', $path->[0]),
-          id => Dongry::Type->serialize ('text', $path->[1]),
-        }, source_name => 'master')->then (sub {
-          my $all = $_[0]->all;
-          return $app->throw_error (404, reason_phrase => 'Object not found')
-              unless @$all;
-          my $items = [map {
-            $_->{data} = Dongry::Type->parse ('json', $_->{data});
-            $_->{id} .= '';
-            $_->{account_id} .= '';
-            $_->{type} = $path->[0];
-            $_;
-          } @$all];
-          return json $app, {objects => $items};
+        return get_objects (
+          search => sub {
+            return $db->select ('object', {
+              type => Dongry::Type->serialize ('text', $path->[0]),
+              id => Dongry::Type->serialize ('text', $path->[1]),
+            }, source_name => 'master');
+          },
+          empty => sub {
+            return $app->throw_error (404, reason_phrase => 'Object not found');
+          },
+        )->then (sub {
+          return json $app, {objects => $_[0]};
         });
       };
     }
@@ -299,22 +307,17 @@ return sub {
       # /{name}/selected.json
       return with_db {
         my $db = shift;
-        my $id = $app->http->request_cookies->{"selected:$path->[0]"};
-        return json $app, {objects => []} unless defined $id;
-        return $db->select ('object', {
-          type => Dongry::Type->serialize ('text', $path->[0]),
-          id => Dongry::Type->serialize ('text', $id),
-        }, source_name => 'master')->then (sub {
-          my $all = $_[0]->all;
-          return json $app, {objects => []} unless @$all;
-          my $items = [map {
-            $_->{data} = Dongry::Type->parse ('json', $_->{data});
-            $_->{id} .= '';
-            $_->{account_id} .= '';
-            $_->{type} = $path->[0];
-            $_;
-          } @$all];
-          return json $app, {objects => $items};
+        return get_objects (
+          search => sub {
+            my $id = $app->http->request_cookies->{"selected:$path->[0]"};
+            return [] unless defined $id;
+            return $db->select ('object', {
+              type => Dongry::Type->serialize ('text', $path->[0]),
+              id => Dongry::Type->serialize ('text', $id),
+            }, source_name => 'master');
+          },
+        )->then (sub {
+          return json $app, {objects => $_[0]};
         });
       };
     }
@@ -378,51 +381,53 @@ return sub {
       # /{name}/list.json
       return with_db {
         my $db = shift;
-        my $page = this_page ($app, limit => 30, max_limit => 100);
-        my $where = {
-          type => Dongry::Type->serialize ('text', $path->[0]),
-        };
-        $where->{timestamp} = $page->{value} if defined $page->{value};
         my $filters = $app->text_param_list ('filter');
-        return $db->select ('object', $where,
-          source_name => 'master',
-          offset => $page->{offset}, limit => $page->{limit} * 5,
-          order => ['timestamp', $page->{order_direction}],
-        )->then (sub {
-          my $items = [map {
-            $_->{data} = Dongry::Type->parse ('json', $_->{data});
-            $_->{id} .= '';
-            $_->{account_id} .= '';
-            $_->{type} = $path->[0];
-            $_;
-          } @{$_[0]->all}];
-          for my $filter (@$filters) {
-            if ($filter =~ /\A($NamePattern)=([1-9][0-9]+)\z/o) {
-              my $name = $1;
-              my $value = $2;
-              $items = [grep {
-                if (defined $_->{data}->{$name} and
-                    $_->{data}->{$name} eq $value) {
-                  $_;
-                } else {
-                  ();
-                }
-              } @$items];
-            } elsif ($filter =~ /\A($NamePattern):null\z/o) {
-              my $name = $1;
-              $items = [grep {
-                if (not defined $_->{data}->{$name}) {
-                  $_;
-                } else {
-                  ();
-                }
-              } @$items];
-            } else {
-              return $app->throw_error
-                  (400, reason_phrase => 'Bad filter |'.$filter.'|');
+        my $page = this_page ($app, limit => 30, max_limit => 100);
+        return get_objects (
+          search => sub {
+            my $where = {
+              type => Dongry::Type->serialize ('text', $path->[0]),
+            };
+            $where->{timestamp} = $page->{value} if defined $page->{value};
+            return $db->select ('object', $where,
+              source_name => 'master',
+              offset => $page->{offset}, limit => $page->{limit} * 5,
+              order => ['timestamp', $page->{order_direction}],
+            );
+          }, # $search
+          filter => sub {
+            my $items = shift;
+            for my $filter (@$filters) {
+              if ($filter =~ /\A($NamePattern)=([1-9][0-9]+)\z/o) {
+                my $name = $1;
+                my $value = $2;
+                $items = [grep {
+                  if (defined $_->{data}->{$name} and
+                      $_->{data}->{$name} eq $value) {
+                    $_;
+                  } else {
+                    ();
+                  }
+                } @$items];
+              } elsif ($filter =~ /\A($NamePattern):null\z/o) {
+                my $name = $1;
+                $items = [grep {
+                  if (not defined $_->{data}->{$name}) {
+                    $_;
+                  } else {
+                    ();
+                  }
+                } @$items];
+              } else {
+                return $app->throw_error
+                    (400, reason_phrase => 'Bad filter |'.$filter.'|');
+              }
             }
-          }
-          @$items = @$items[0..($page->{limit}-1)] if @$items > $page->{limit};
+            @$items = @$items[0..($page->{limit}-1)] if @$items > $page->{limit};
+            return $items;
+          }, # filter
+        )->then (sub {
+          my $items = $_[0];
           my $next_page = next_page $page, $items, 'timestamp';
           return json $app, {objects => $items, %$next_page};
         });
