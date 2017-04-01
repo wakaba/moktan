@@ -38,9 +38,9 @@ $component.actions = function (e, attrName, data) {
   (e.getAttribute (attrName) || '').split (/\s+/).filter (function (_) {
     return _.length > 0;
   }).forEach (function (_) {
-    _ = _.split (/:/, 2);
-    var actionName = _[0];
-    var arg = _[1]; // or undefined
+    _ = _.split (/:/);
+    var actionName = _.length ? _.shift () : '';
+    var arg = _.length ? _.join (':') : null;
     var action = ($component.actions.handlers[attrName] || {})[actionName];
     if (!action) throw "Action |"+actionName+"| for |"+attrName+"| is not defined";
     p = p.then (function () {
@@ -122,7 +122,11 @@ $component.define ('object-list', function (e) {
       var url = 'info.json';
     } else {
       var type = this.getAttribute ('object-type');
-      var url = '/' + encodeURIComponent (type) + '/list.json';
+      if (this.hasAttribute ('object-selected')) {
+        var url = '/' + encodeURIComponent (type) + '/selected.json';
+      } else {
+        var url = '/' + encodeURIComponent (type) + '/list.json';
+      }
     }
     if (opts.ref) {
       url += '?ref=' + encodeURIComponent (opts.ref);
@@ -157,7 +161,7 @@ $component.define ('object-list', function (e) {
     }[type] || 'list-item';
 
     return e._loading = e._loading.then (function () {
-      return fetch (url, {});
+      return fetch (url, {credentials: 'same-origin'});
     }).then (function (res) {
       return res.json ();
     }).then (function (json) {
@@ -186,10 +190,15 @@ $component.define ('object-list', function (e) {
         if (e._newest < item.timestamp) e._newest = item.timestamp;
       });
       if (opts.clear) main.textContent = '';
-      if (opts.prepend) {
-        main.insertBefore (added, main.firstChild);
+      if (added.hasChildNodes ()) {
+        if (opts.prepend) {
+          main.insertBefore (added, main.firstChild);
+        } else {
+          main.appendChild (added);
+        }
+        $$ (e, 'list-is-empty').forEach (function (f) { f.hidden = true });
       } else {
-        main.appendChild (added);
+        $$ (e, 'list-is-empty').forEach (function (f) { f.hidden = false });
       }
 
       if (opts.updatePager) {
@@ -231,6 +240,7 @@ $component.define ('form', function (e) {
       method: this.method,
       body: body,
       referrerPolicy: 'origin',
+      credentials: 'same-origin',
     }).then (function (res) {
       return res.json ();
     }).then (function (json) {
@@ -246,13 +256,23 @@ $component.define ('form', function (e) {
 }); // <form>
 
 $component.defineAction ('data-submitted', 'objectListLoadNewer', function (data, arg) {
-  var list = $$.root (this).getElementById (arg);
+  if (/^global:/.test (arg)) {
+    arg = arg.replace (/^global:/, '');
+    var list = document.getElementById (arg);
+  } else {
+    var list = $$.root (this).getElementById (arg);
+  }
   if (!list) throw "Element #" + arg + ' not found';
   list.loadNewer ();
 });
 
 $component.defineAction ('data-submitted', 'objectListReload', function (data, arg) {
-  var list = $$.root (this).getElementById (arg);
+  if (/^global:/.test (arg)) {
+    arg = arg.replace (/^global:/, '');
+    var list = document.getElementById (arg);
+  } else {
+    var list = $$.root (this).getElementById (arg);
+  }
   if (!list) throw "Element #" + arg + ' not found';
   list.load ({clear: true, updatePager: true});
 });

@@ -277,6 +277,31 @@ return sub {
       };
     }
 
+    if (@$path == 2 and
+        $path->[0] =~ /\A$NamePattern\z/o and
+        $path->[1] eq 'selected.json') {
+      # /{name}/selected.json
+      return with_db {
+        my $db = shift;
+        my $id = $app->http->request_cookies->{"selected:$path->[0]"};
+        return json $app, {objects => []} unless defined $id;
+        return $db->select ('object', {
+          type => Dongry::Type->serialize ('text', $path->[0]),
+          id => Dongry::Type->serialize ('text', $id),
+        }, source_name => 'master')->then (sub {
+          my $all = $_[0]->all;
+          return json $app, {objects => []} unless @$all;
+          my $items = [map {
+            $_->{data} = Dongry::Type->parse ('json', $_->{data});
+            $_->{id} .= '';
+            $_->{type} = $path->[0];
+            $_;
+          } @$all];
+          return json $app, {objects => $items};
+        });
+      };
+    }
+
     if (@$path == 3 and
         $path->[0] =~ /\A$NamePattern\z/o and
         $path->[1] =~ /\A[1-9][0-9]*\z/ and
@@ -311,6 +336,23 @@ return sub {
           return json $app, {};
         });
       };
+    }
+
+    if (@$path == 3 and
+        $path->[0] =~ /\A$NamePattern\z/o and
+        $path->[1] =~ /\A[1-9][0-9]*\z/ and
+        $path->[2] eq 'setcookie.json') {
+      # /{name}/{id}/setcookie.json
+      $app->requires_request_method ({POST => 1});
+      $app->requires_same_origin;
+      $app->http->set_response_cookie
+          ("selected:$path->[0]" => $path->[1],
+           expires => time + 60*60,
+           domain => Web::URL->parse_string ($app->http->url->stringify)->host->to_ascii,
+           path => '/',
+           httponly => 1,
+          );
+      return json $app, {};
     }
 
     if (@$path == 2 and
