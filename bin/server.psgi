@@ -240,6 +240,15 @@ sub get_objects ($%) {
   $where->{timestamp} = $args{page}->{value}
       if defined $args{page} and defined $args{page}->{value};
 
+  my $filters = [@{$args{filter} or []}];
+  for (@$filters) {
+    if ($_->[0] eq '=' and $_->[1] eq 'account_id') {
+      $where->{account_id} = 0+$_->[2];
+      $_->[0] = 'nop';
+      last;
+    }
+  }
+
   return $db->select ('object', $where,
     source_name => 'master',
     (defined $args{page} ? (
@@ -256,7 +265,7 @@ sub get_objects ($%) {
       $_;
     } @{$_[0]->all}];
 
-    for my $filter (@{$args{filter} or []}) {
+    for my $filter (@$filters) {
       if ($filter->[0] eq '=') {
         $items = [grep {
           if (defined $_->{data}->{$filter->[1]} and
@@ -274,6 +283,8 @@ sub get_objects ($%) {
             ();
           }
         } @$items];
+      } elsif ($filter->[0] eq 'nop') {
+        #
       } else {
         die "Bad filter type |$filter->[0]|";
       }
