@@ -1,5 +1,3 @@
-# -*- Makefile -*-
-
 all:
 
 WGET = wget
@@ -42,6 +40,6 @@ test: test-deps test-main
 test-deps: deps
 
 test-main:
-	$(PROVE) t/*.t
+	#$(PROVE) t/*.t
 
 ## License: Public Domain.
