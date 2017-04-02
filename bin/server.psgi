@@ -325,25 +325,41 @@ return sub {
       return temma $app, $path, {};
     }
 
-    if (@$path == 3 and
-        $path->[0] =~ /\A$NamePattern\z/o and
-        $path->[1] =~ /\A$IDPattern\z/ and
-        ($path->[2] eq '' or $path->[2] =~ /\A$NamePattern\z/o)) {
-      # /{name}/{id}/
-      # /{name}/{id}/{name}
+    X: {
+      last X unless @$path % 2;
+      last X unless $path->[-1] eq '' or $path->[-1] =~ /\A$NamePattern\z/o;
+      for (0..($#$path-1)) {
+        if ($_ % 2) {
+          last X unless $path->[$_] =~ /\A$IDPattern\z/o;
+        } else {
+          last X unless $path->[$_] =~ /\A$NamePattern\z/o;
+        }
+      }
+      # /{name}/{id}/../{name}/{id}/
+      # /{name}/{id}/../{name}/{id}/{name}
       return temma $app, $path, {};
-    }
+    } # X
 
-    if (@$path == 3 and
-        $path->[0] =~ /\A$NamePattern\z/o and
-        $path->[1] =~ /\A$IDPattern\z/ and
-        $path->[2] eq 'info.json') {
-      # /{name}/{id}/info.json
+    X: {
+      last X unless @$path % 2;
+      last X unless $path->[-1] eq 'info.json';
+      my $filters = [];
+      for (0..($#$path-1)) {
+        if ($_ % 2) {
+          last X unless $path->[$_] =~ /\A$IDPattern\z/o;
+          push @$filters, ['=', $path->[$_-1] . '_id', $path->[$_]];
+        } else {
+          last X unless $path->[$_] =~ /\A$NamePattern\z/o;
+        }
+      }
+      pop @$filters;
+      # /{name}/{id}/.../{name}/{id}/info.json
       return with_db {
         my $db = shift;
         return get_objects ($db,
-          type => $path->[0],
-          id => $path->[1],
+          type => $path->[-3],
+          id => $path->[-2],
+          filter => $filters,
           empty => sub {
             return $app->throw_error (404, reason_phrase => 'Object not found');
           },
